@@ -1,0 +1,92 @@
+---
+- name: Check installed Trivy version
+  ansible.builtin.command: trivy --version
+  register: trivy_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install Trivy release tarball (checksum-verified)
+  when: trivy_version not in (trivy_installed.stdout | default(''))
+  block:
+    - name: Download Trivy
+      ansible.builtin.get_url:
+        url: "https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_Linux-{{ trivy_arch_map[ansible_facts['architecture']] }}.tar.gz"
+        dest: "/tmp/trivy-{{ trivy_version }}.tar.gz"
+        checksum: "sha256:https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_checksums.txt"
+        mode: "0600"
+      # The download is harmless to perform in --check, so the extract below can find it.
+      check_mode: false
+    - name: Extract trivy binary
+      ansible.builtin.unarchive:
+        src: "/tmp/trivy-{{ trivy_version }}.tar.gz"
+        dest: "{{ trivy_install_dir }}"
+        include: [trivy]
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+  always:
+    - name: Remove downloaded tarball
+      ansible.builtin.file:
+        path: "/tmp/trivy-{{ trivy_version }}.tar.gz"
+        state: absent
+
+- name: Create cache, state, config and textfile directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ trivy_cache_dir }}"
+    - "{{ trivy_cache_dir }}/tmp"
+    - "{{ trivy_state_dir }}"
+    - /etc/trivy-host-scan
+
+# Deliberately no owner/mode: the textfile directory is often shared with other
+# collectors that run as a different user and write their own metrics here. We only
+# ensure it exists; the scan itself runs as root.
+- name: Ensure textfile collector dir exists (ownership untouched)
+  ansible.builtin.file:
+    path: "{{ trivy_textfile_dir }}"
+    state: directory
+
+- name: Deploy scan config
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: /etc/trivy-host-scan/config.json
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy scan wrapper
+  ansible.builtin.copy:
+    src: trivy-host-scan
+    dest: /usr/local/bin/trivy-host-scan
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy systemd service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - trivy-host-scan.service
+    - trivy-host-scan.timer
+  notify: Reload systemd
+
+- name: Flush handlers so units are known
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable weekly timer
+  ansible.builtin.systemd:
+    name: trivy-host-scan.timer
+    enabled: true
+    state: started
+  # In --check the unit files are not really written, so the timer cannot be found.
+  ignore_errors: "{{ ansible_check_mode }}"

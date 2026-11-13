@@ -1,0 +1,12 @@
+---
+# Deploy the Trivy host + container vulnerability scan (weekly systemd timer) to Linux hosts.
+# Writes trivy_host.prom to the node_exporter textfile directory; Alloy ships it to Grafana Cloud.
+#
+# Usage:
+#   ansible-playbook -i inventory.yml site.yml --check --diff     # dry run
+#   ansible-playbook -i inventory.yml site.yml -l host1           # one host first
+- name: Deploy Trivy host scanning
+  hosts: trivy_targets
+  become: true
+  roles:
+    - role: trivy-host-scan

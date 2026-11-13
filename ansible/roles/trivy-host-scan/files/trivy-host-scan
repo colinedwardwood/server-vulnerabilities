@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Run Trivy against this host's root filesystem and running Docker images, then write
+Prometheus textfile-collector metrics (atomically) for Alloy's unix exporter to read."""
+import json, os, subprocess, sys, tempfile, time, socket
+
+CFG = json.load(open("/etc/trivy-host-scan/config.json"))
+SEV = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+common = ["--quiet", "--format", "json", "--cache-dir", CFG["cache_dir"], "--scanners", "vuln"]
+if CFG["ignore_unfixed"]:
+    common.append("--ignore-unfixed")
+
+
+def run(args):
+    r = subprocess.run(["trivy"] + args + common, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip()[-500:])
+    return json.loads(r.stdout or "{}")
+
+
+def count(report):
+    out = dict.fromkeys(SEV, 0)
+    for res in report.get("Results") or []:
+        for v in res.get("Vulnerabilities") or []:
+            if v.get("Severity") in out:
+                out[v["Severity"]] += 1
+    return out
+
+
+def esc(s):
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+start = time.time()
+lines = [
+    "# HELP trivy_host_vulnerabilities Vulnerabilities found by Trivy (fixed-only unless configured otherwise).",
+    "# TYPE trivy_host_vulnerabilities gauge",
+]
+ok = 1
+try:
+    skip = [a for d in CFG["skip_dirs"] for a in ("--skip-dirs", d)]
+    c = count(run(["rootfs", "/", "--pkg-types", "os"] + skip))
+    for s in SEV:
+        lines.append(f'trivy_host_vulnerabilities{{target="host",severity="{s}"}} {c[s]}')
+except Exception as e:  # noqa: BLE001
+    ok = 0
+    print(f"host scan failed: {e}", file=sys.stderr)
+
+img_ok = 1
+if CFG["scan_docker_images"]:
+    lines += [
+        "# HELP trivy_image_vulnerabilities Vulnerabilities in running Docker images.",
+        "# TYPE trivy_image_vulnerabilities gauge",
+    ]
+    try:
+        imgs = subprocess.run(["docker", "ps", "--format", "{{.Image}}"], capture_output=True, text=True, check=True).stdout.split()
+        for img in sorted(set(imgs)):
+            try:
+                c = count(run(["image", img]))
+                for s in SEV:
+                    lines.append(f'trivy_image_vulnerabilities{{image="{esc(img)}",severity="{s}"}} {c[s]}')
+            except Exception as e:  # noqa: BLE001
+                img_ok = 0
+                print(f"image scan failed for {img}: {e}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        img_ok = 0
+        print(f"docker ps failed: {e}", file=sys.stderr)
+
+now = int(time.time())
+lines += [
+    "# TYPE trivy_host_scan_success gauge",
+    f"trivy_host_scan_success {ok and img_ok}",
+    "# TYPE trivy_host_scan_duration_seconds gauge",
+    f"trivy_host_scan_duration_seconds {time.time() - start:.0f}",
+    "# TYPE trivy_host_scan_last_run_timestamp_seconds gauge",
+    f"trivy_host_scan_last_run_timestamp_seconds {now}",
+]
+if ok and img_ok:
+    lines += ["# TYPE trivy_host_scan_last_success_timestamp_seconds gauge",
+              f"trivy_host_scan_last_success_timestamp_seconds {now}"]
+else:
+    # keep the previous success timestamp so a staleness alert can fire
+    try:
+        for l in open(os.path.join(CFG["textfile_dir"], "trivy_host.prom")):
+            if l.startswith("trivy_host_scan_last_success_timestamp_seconds"):
+                lines += ["# TYPE trivy_host_scan_last_success_timestamp_seconds gauge", l.rstrip()]
+    except OSError:
+        pass
+
+fd, tmp = tempfile.mkstemp(dir=CFG["textfile_dir"], prefix=".trivy_host.")
+with os.fdopen(fd, "w") as f:
+    f.write("\n".join(lines) + "\n")
+os.chmod(tmp, 0o644)
+os.replace(tmp, os.path.join(CFG["textfile_dir"], "trivy_host.prom"))
+sys.exit(0 if ok and img_ok else 1)

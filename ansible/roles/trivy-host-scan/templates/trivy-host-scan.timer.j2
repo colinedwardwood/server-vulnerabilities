@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Trivy host and container vulnerability scan
+
+[Timer]
+OnCalendar={{ trivy_timer_oncalendar }}
+RandomizedDelaySec={{ trivy_timer_random_delay }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

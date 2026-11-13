@@ -1,0 +1,7 @@
+{{ {
+  "cache_dir": trivy_cache_dir,
+  "textfile_dir": trivy_textfile_dir,
+  "ignore_unfixed": trivy_ignore_unfixed,
+  "skip_dirs": trivy_rootfs_skip_dirs,
+  "scan_docker_images": trivy_scan_docker_images
+} | to_nice_json }}

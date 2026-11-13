@@ -1,0 +1,84 @@
+# Grafana / Prometheus alert rules for the server-vulnerabilities pipeline.
+#
+# Categorized using the SAAFE model (https://github.com/grafana/saafe-model):
+#   Failure — binary conditions indicating the scanner is broken or silent
+#   Error   — vulnerability counts exceeding a tolerance threshold
+#
+# The threshold lives in the PromQL expression: a rule fires when the expression
+# returns a series. Tune the numbers to your fleet.
+#
+# Deploy with ./scripts/deploy-alerts.sh, or import via the Alerting UI
+# (Alerting → Alert rules → Import).
+
+groups:
+  # ════════════════════════════════════════════════════════════════════════════
+  # FAILURE — the scanner is broken or has gone quiet
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: trivy-failure
+    interval: 5m
+    rules:
+      - alert: TrivyHostScanStale
+        expr: |
+          (time() - trivy_host_scan_last_success_timestamp_seconds) > 691200
+        for: 30m
+        labels:
+          severity: warning
+          saafe_category: failure
+          saafe_severity: warning
+        annotations:
+          summary: "Trivy scan has not succeeded for over 8 days on {{ $labels.instance }}"
+          description: >-
+            The last successful Trivy scan on {{ $labels.instance }} was
+            {{ $value | humanizeDuration }} ago. The weekly timer may have stopped,
+            Trivy may be failing to download its database, or Alloy may not be
+            shipping the textfile metrics.
+
+      - alert: TrivyHostScanFailing
+        expr: |
+          trivy_host_scan_success == 0
+        for: 30m
+        labels:
+          severity: warning
+          saafe_category: failure
+          saafe_severity: warning
+        annotations:
+          summary: "Trivy scan failed on {{ $labels.instance }}"
+          description: >-
+            The most recent Trivy run on {{ $labels.instance }} reported a failure
+            (host scan or at least one image scan). See
+            `journalctl -u trivy-host-scan.service` on the host.
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # ERROR — vulnerability load above tolerance
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: trivy-error
+    interval: 15m
+    rules:
+      - alert: TrivyHostCriticalCVEs
+        expr: |
+          sum by (instance) (trivy_host_vulnerabilities{severity="CRITICAL"}) > 25
+        for: 1h
+        labels:
+          severity: warning
+          saafe_category: error
+          saafe_severity: warning
+        annotations:
+          summary: "{{ $value }} critical CVEs with a fix available on {{ $labels.instance }}"
+          description: >-
+            Trivy reports {{ $value }} critical vulnerabilities that have a fixed
+            version available on {{ $labels.instance }}. Apply pending OS updates
+            and reboot if a kernel update is pending.
+
+      - alert: TrivyImageCriticalCVEs
+        expr: |
+          sum by (instance, image) (trivy_image_vulnerabilities{severity="CRITICAL"}) > 10
+        for: 1h
+        labels:
+          severity: warning
+          saafe_category: error
+          saafe_severity: warning
+        annotations:
+          summary: "Image {{ $labels.image }} has {{ $value }} critical CVEs on {{ $labels.instance }}"
+          description: >-
+            A running container image has critical vulnerabilities that have a fix
+            available. Pull a newer image tag and recreate the container.

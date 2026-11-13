@@ -1,0 +1,16 @@
+---
+# Ansible inventory: list your target hosts here (an EXAMPLE; replace the placeholders).
+# Do not commit real IPs/FQDNs if they are sensitive.
+#
+# ansible-playbook -i inventory.yml site.yml
+all:
+  children:
+    trivy_targets:
+      hosts:
+        host1:
+          ansible_host: 192.0.2.10          # replace with your host IP or FQDN
+          ansible_user: ubuntu              # SSH user (must have sudo)
+          ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          # Per-host overrides (optional):
+          # trivy_scan_docker_images: false
+          # trivy_timer_oncalendar: "Sat *-*-* 02:00:00"

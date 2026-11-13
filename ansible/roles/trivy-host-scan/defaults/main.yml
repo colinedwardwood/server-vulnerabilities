@@ -1,0 +1,36 @@
+---
+# Trivy host + container vulnerability scanning for standalone hosts.
+# (Kubernetes workloads are better covered by an in-cluster trivy-operator; this role is for
+# standalone Linux hosts that are not part of a cluster.)
+
+trivy_version: "0.76.2"
+trivy_arch_map:
+  x86_64: "64bit"
+  aarch64: "ARM64"
+trivy_install_dir: /usr/local/bin
+trivy_cache_dir: /var/cache/trivy
+trivy_state_dir: /var/lib/trivy-host-scan
+trivy_textfile_dir: /var/lib/node_exporter/textfile_collector
+
+# Weekly, randomised so hosts sharing a switch/NAS do not all hit the DB mirror at once.
+trivy_timer_oncalendar: "Sun *-*-* 03:30:00"
+trivy_timer_random_delay: "2h"
+
+# Only count vulnerabilities that have a fix available (actionable ones).
+trivy_ignore_unfixed: true
+
+# Host filesystem scan: OS packages only (cheap). Skip data mounts and container storage;
+# containers are scanned separately as images.
+trivy_rootfs_skip_dirs:
+  - /proc
+  - /sys
+  - /dev
+  - /run
+  - /var/lib/docker
+  - /var/lib/containerd
+  - /mnt
+  - /media
+  - /srv
+  - /home
+
+trivy_scan_docker_images: true

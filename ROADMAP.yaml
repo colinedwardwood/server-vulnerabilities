@@ -1,0 +1,13 @@
+# Roadmap: honest, not a promise.
+next:
+  - Optional per-severity and per-package ignore policy (a .trivyignore deployed by the role)
+  - Per-image labels for the registry and tag so dashboards can group by repository
+  - Recording rules that pre-aggregate fleet totals for long-range trend panels
+later:
+  - SBOM generation (Trivy `sbom`) and an artifact of the last SBOM per host
+  - Secret and misconfiguration scanners as opt-in (today only the vulnerability scanner runs)
+  - Support for non-Debian hosts (RHEL family) and ARM hosts beyond the architecture map
+  - Kubernetes: scrape an in-cluster trivy-operator and add cluster-image panels to the dashboard
+out_of_scope:
+  - Patching or auto-updating packages (this project reports; it never changes the host)
+  - Edge or CDN analytics (those need a different data source)

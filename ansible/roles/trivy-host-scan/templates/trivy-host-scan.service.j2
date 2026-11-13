@@ -1,0 +1,17 @@
+[Unit]
+Description=Trivy host and container vulnerability scan
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Lowest CPU and idle I/O priority: scans must never compete with apps or backups
+# (a full-rootfs scan is I/O heavy on spinning disks and small hosts).
+# Trivy unpacks its DB under TMPDIR; /tmp is a small tmpfs on some small hosts (ENOSPC), so use disk.
+Environment=TMPDIR={{ trivy_cache_dir }}/tmp
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryMax=1G
+TimeoutStartSec=3h
+ExecStart=/usr/bin/flock -w 1800 /run/lock/trivy-host-scan.lock /usr/local/bin/trivy-host-scan

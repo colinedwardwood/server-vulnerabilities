@@ -1,0 +1,43 @@
+// Minimal Grafana Alloy snippet: read the Trivy textfile and ship it to Grafana Cloud.
+//
+// If you already run Alloy's unix exporter (or node_exporter) on the host, you only
+// need to add the `textfile` block (or the --collector.textfile.directory flag) so it
+// picks up /var/lib/node_exporter/textfile_collector/trivy_host.prom.
+//
+// Credentials are read from the environment (e.g. /etc/default/alloy), never inline.
+
+prometheus.exporter.unix "host" {
+  set_collectors = ["textfile"]
+
+  textfile {
+    directory = "/var/lib/node_exporter/textfile_collector"
+  }
+}
+
+prometheus.scrape "trivy_textfile" {
+  targets    = prometheus.exporter.unix.host.targets
+  job_name   = "integrations/trivy_host"
+  forward_to = [prometheus.relabel.trivy_only.receiver]
+}
+
+// Keep only the Trivy series (the textfile collector can carry other files too).
+prometheus.relabel "trivy_only" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "trivy_.*"
+    action        = "keep"
+  }
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = env("GRAFANA_PROM_URL")   // e.g. https://prometheus-prod-XX.grafana.net/api/prom/push
+
+    basic_auth {
+      username = env("GRAFANA_PROM_USERNAME")
+      password = env("GRAFANA_PROM_PASSWORD")
+    }
+  }
+}
